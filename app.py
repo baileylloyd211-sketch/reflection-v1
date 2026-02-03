@@ -149,6 +149,54 @@ class Case:
     history: str
     constraints: str
 
+def synthesize(goal: str, obstacle: str) -> Dict[str, str]:
+    o = obstacle.lower()
+
+    if any(k in o for k in ["approval", "permission", "sign off", "sign-off"]):
+        return {
+            "type": "POWER",
+            "statement": "This is primarily a power problem.",
+            "exclude": "This is not a motivation or effort issue.",
+            "next": "Name the decision-maker and their explicit criteria."
+        }
+
+    if any(k in o for k in ["deadline", "time", "late", "urgent"]):
+        return {
+            "type": "TIME",
+            "statement": "This is primarily a time constraint problem.",
+            "exclude": "This is not a quality or strategy issue.",
+            "next": "State the hard deadline and what can be cut."
+        }
+
+    if any(k in o for k in ["unclear", "confusing", "not sure", "undefined"]):
+        return {
+            "type": "CLARITY",
+            "statement": "This is primarily a clarity problem.",
+            "exclude": "This is not a capability issue.",
+            "next": "Write a one-sentence definition of done."
+        }
+
+    return {
+        "type": "EXECUTION",
+        "statement": "This is primarily an execution problem.",
+        "exclude": "This is not blocked by authority.",
+        "next": "Identify the smallest action you can complete in 30 minutes."
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def solve_case(case: Case) -> Dict[str, str]:
     """
     Deterministic-ish solver: produces
