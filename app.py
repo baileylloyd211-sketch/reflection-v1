@@ -137,6 +137,17 @@ class Case:
     emotions: str
     history: str
     constraints: str
+@dataclass
+class Case:
+    goal: str
+    time_horizon: str
+    success_criteria: str
+    obstacle: str
+    problem: str
+    power: str
+    emotions: str
+    history: str
+    constraints: str
 
 def solve_case(case: Case) -> Dict[str, str]:
     """
@@ -165,8 +176,8 @@ def solve_case(case: Case) -> Dict[str, str]:
     history_low = clean_text(case.history).lower()
 
     # Heuristics (simple but useful)
-    external_power_block = any(k in power_low for k in ["they decide", "they control", "approval", "permission", "budget owner", "manager", "vp", "board"]) \
-        and any(k in constraints_low for k in ["can't", "cannot", "not allowed", "policy", "legal", "hr", "contract", "compliance"])
+    external_power_block = any(k in power_low for k in ["they decide", "they control", "approval", "permission", "owner", "manager", "vp", "board"]) \
+        and any(k in constraints_low for k in ["can't", "cannot", "can't", "denied", "not allowed", "policy", "legal", "hr", "contract", "compliance"])
 
     must_escalate = any(k in constraints_low for k in ["must escalate", "has to be escalated", "required escalation", "non-negotiable escalation"])
     time_urgent = any(k in constraints_low for k in ["today", "now", "immediately", "this week", "24", "48 hours", "deadline"])
@@ -393,35 +404,53 @@ with tab_solve:
         constraints = st.text_area("Constraints (what you cannot do + deadlines/boundaries).", height=90, placeholder="Example: Must launch this week; cannot hire contractor")
 
         submitted = st.form_submit_button("Run")
+if submitted:
+    # --- SYNTHESIS (FIRST, HARD) ---
+    s = synthesize(clean_text(goal), clean_text(obstacle))
 
-    if submitted:
-        case = Case(
-            goal=clean_text(goal),
-            time_horizon=clean_text(time_horizon),
-            success_criteria=clean_text(success_criteria),
-            obstacle=clean_text(obstacle),
-            problem=clean_text(problem),
-            power=clean_text(power),
-            emotions=clean_text(emotions),
-            history=clean_text(history),
-            constraints=clean_text(constraints),
-        )
-        result = solve_case(case)
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="badge">SYNTHESIS · {s["type"]}</div>
+          <div class="hr"></div>
+          <div class="h2">{s["statement"]}</div>
+          <div class="muted">{s["exclude"]}</div>
+          <div class="hr"></div>
+          <div class="mono">NEXT MOVE REQUIRED: {s["next"]}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.markdown(
-            f"""
-            <div class="card">
-              <div class="badge">{result["status"]}</div>
-              <div class="hr"></div>
-              <div class="h2">{result["summary"]}</div>
-              <div class="hr"></div>
-              <div class="mono" style="white-space: pre-wrap; line-height: 1.45;">{result["frame"]}</div>
-              <div class="hr"></div>
-              <div class="mono" style="white-space: pre-wrap; line-height: 1.55;">{result["output"]}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    # --- FULL SOLVE (UNCHANGED) ---
+    case = Case(
+        goal=clean_text(goal),
+        time_horizon=clean_text(time_horizon),
+        success_criteria=clean_text(success_criteria),
+        obstacle=clean_text(obstacle),
+        problem=clean_text(problem),
+        power=clean_text(power),
+        emotions=clean_text(emotions),
+        history=clean_text(history),
+        constraints=clean_text(constraints),
+    )
+    result = solve_case(case)
+
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="badge">{result["status"]}</div>
+          <div class="hr"></div>
+          <div class="h2">{result["summary"]}</div>
+          <div class="hr"></div>
+          <div class="mono" style="white-space: pre-wrap; line-height: 1.45;">{result["frame"]}</div>
+          <div class="hr"></div>
+          <div class="mono" style="white-space: pre-wrap; line-height: 1.55;">{result["output"]}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 with tab_privacy:
     st.markdown(
