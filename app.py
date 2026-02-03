@@ -7,10 +7,7 @@ from typing import Dict, Optional, Tuple
 import streamlit as st
 
 # Stripe is optional at dev time; app will run without it if paywall disabled.
-try:
-    import stripe
-except Exception:
-    stripe = None
+
 
 # -----------------------------
 # Config
