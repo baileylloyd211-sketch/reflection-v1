@@ -1,619 +1,465 @@
-# app.py
-import streamlit as st
+import os
+import re
+import textwrap
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, Optional, Tuple
+
+import streamlit as st
+
+# Stripe is optional at dev time; app will run without it if paywall disabled.
+try:
+    import stripe
+except Exception:
+    stripe = None
 
 # -----------------------------
-# Page + Styling
+# Config
 # -----------------------------
 st.set_page_config(
-    page_title="Reflection | GiveItToGot",
-    page_icon="🪞",
+    page_title="GiveItToGot | Problem Solver",
+    page_icon="⬛",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
+CONTACT_EMAIL = "baileylloyd211@gmail.com"
+
+# Set this to your privacy policy URL (already exists on GiveItToGot)
+PRIVACY_POLICY_URL = st.secrets.get("PRIVACY_POLICY_URL", "").strip()
+
+# Paywall settings
+PAYWALL_ENABLED = bool(st.secrets.get("PAYWALL_ENABLED", False))
+APP_PUBLIC_URL = st.secrets.get("APP_PUBLIC_URL", "").strip()  # e.g. https://your-app.streamlit.app
+
+# Stripe settings (required if PAYWALL_ENABLED)
+STRIPE_SECRET_KEY = st.secrets.get("STRIPE_SECRET_KEY", "").strip()
+STRIPE_PRICE_ID = st.secrets.get("STRIPE_PRICE_ID", "").strip()
+STRIPE_SUCCESS_URL = st.secrets.get("STRIPE_SUCCESS_URL", "").strip()  # e.g. https://your-app.../?paid=1
+STRIPE_CANCEL_URL = st.secrets.get("STRIPE_CANCEL_URL", "").strip()
+
+# -----------------------------
+# Styling: black/white/gray + minimal red
+# -----------------------------
 CSS = """
 <style>
 :root{
-  --bg:#0b0f14;
-  --panel:#111827;
-  --panel2:#0f172a;
-  --text:#e5e7eb;
-  --muted:#9ca3af;
-  --accent:#60a5fa;
-  --accent2:#f472b6;
-  --good:#34d399;
-  --warn:#fbbf24;
-  --bad:#fb7185;
-  --border: rgba(255,255,255,.08);
-  --shadow: 0 16px 40px rgba(0,0,0,.35);
-  --radius: 18px;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  --bg: #0b0b0c;
+  --panel: #111114;
+  --panel2:#151518;
+  --text: #f2f2f2;
+  --muted:#b7b7b7;
+  --border: rgba(255,255,255,.10);
+  --shadow: 0 18px 50px rgba(0,0,0,.55);
+  --radius: 14px;
+  --red: #ff2d2d;
 }
-html, body, [class*="css"] { font-family: var(--sans); }
-.stApp { background: radial-gradient(1200px 700px at 50% -100px, #1f2937 0%, var(--bg) 55%); color: var(--text); }
-a { color: var(--accent); text-decoration: none; }
-.small { color: var(--muted); font-size: 0.95rem; }
-.brand { letter-spacing: .08em; font-weight: 700; font-size: .85rem; color: var(--muted); text-transform: uppercase; }
-.panel {
-  background: linear-gradient(180deg, rgba(17,24,39,.95) 0%, rgba(15,23,42,.92) 100%);
+
+html, body, [class*="css"] { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+.stApp {
+  background: radial-gradient(900px 450px at 50% -120px, rgba(255,255,255,.08) 0%, var(--bg) 60%);
+  color: var(--text);
+}
+a { color: var(--text); text-decoration: underline; text-decoration-color: rgba(255,45,45,.65); }
+small, .muted { color: var(--muted); }
+
+.card {
+  background: linear-gradient(180deg, rgba(17,17,20,.95) 0%, rgba(21,21,24,.92) 100%);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px 18px;
+  padding: 18px 16px;
   box-shadow: var(--shadow);
 }
-.title {
-  font-size: 2.0rem;
-  font-weight: 800;
-  margin: 0 0 6px 0;
+
+.h1 { font-size: 1.55rem; font-weight: 800; margin: 0 0 8px 0; letter-spacing: .02em; }
+.h2 { font-size: 1.05rem; font-weight: 750; margin: 0 0 10px 0; color: var(--text); }
+.hr { height: 1px; background: var(--border); margin: 14px 0; }
+
+.red { color: var(--red); font-weight: 800; letter-spacing: .02em; }
+.badge {
+  display:inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,45,45,.35);
+  background: rgba(255,45,45,.08);
+  color: var(--text);
+  font-size: .85rem;
 }
-.subtitle { color: var(--muted); margin: 0 0 14px 0; line-height: 1.5; }
-.hr { height: 1px; background: var(--border); margin: 16px 0; }
-.pill {
-  display:inline-block; padding: 6px 10px; border-radius: 999px;
-  background: rgba(96,165,250,.12);
-  border: 1px solid rgba(96,165,250,.22);
-  color: #cfe5ff;
-  font-size: .85rem; margin-right: 8px; margin-bottom: 8px;
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+textarea, input, .stTextInput>div>div>input {
+  background: rgba(0,0,0,.25) !important;
 }
-.btnrow { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
-.caption { font-size: .92rem; color: var(--muted); }
-.progressWrap { margin-top: 8px; }
-.mirrorStage {
-  position: relative;
-  border-radius: 22px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: radial-gradient(900px 380px at 50% 5%, rgba(96,165,250,.20) 0%, rgba(244,114,182,.10) 35%, rgba(17,24,39,.95) 72%);
-  box-shadow: 0 25px 70px rgba(0,0,0,.45);
-  overflow: hidden;
-  padding: 22px 18px;
+
+.stButton>button {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  padding: 10px 12px;
 }
-.curtainLeft, .curtainRight{
-  position:absolute; top:0; bottom:0; width:52%;
-  background: linear-gradient(180deg, #7f1d1d 0%, #450a0a 100%);
-  filter: saturate(1.2);
+.stButton>button:hover {
+  border: 1px solid rgba(255,45,45,.45);
+  background: rgba(255,45,45,.08);
 }
-.curtainLeft{ left:0; clip-path: polygon(0 0, 100% 0, 85% 100%, 0 100%); }
-.curtainRight{ right:0; clip-path: polygon(15% 100%, 100% 0, 100% 100%, 0 100%); }
-.curtainFold{
-  position:absolute; top:-40px; bottom:-40px; width:20px;
-  background: rgba(255,255,255,.10);
-  filter: blur(0.2px);
-}
-.curtainLeft .curtainFold{ right: 36px; }
-.curtainRight .curtainFold{ left: 36px; }
-.stageInner { position: relative; z-index: 2; }
-.lipstick {
-  font-family: "Comic Sans MS", "Brush Script MT", cursive;
-  font-size: 1.55rem;
-  color: rgba(255,255,255,.92);
-  text-shadow: 0 2px 0 rgba(0,0,0,.35);
-}
-.lipstick strong { color: rgba(244,114,182,.95); }
-.mirrorGlass{
-  background: linear-gradient(145deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 18px;
-  padding: 16px 14px;
-  margin-top: 12px;
-}
-.scoreGrid{
-  display:grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 10px;
-}
-.metric {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 12px;
-  background: rgba(15,23,42,.65);
-}
-.metric .k { color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
-.metric .v { font-weight: 800; font-size: 1.1rem; }
-.footer { margin-top: 22px; color: var(--muted); font-size: .9rem; text-align:center; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
 # -----------------------------
-# Quiz Model
+# Helpers
 # -----------------------------
-DIMENSIONS = ["Integrity", "Empathy", "Agency", "Restraint"]
+def clean_text(s: str) -> str:
+    s = (s or "").strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def too_vague(s: str) -> bool:
+    """Lightweight vagueness filter. Not perfect, but blocks the worst inputs."""
+    s_low = clean_text(s).lower()
+    vague = [
+        "toxic", "bad vibe", "vibes", "stress", "anxiety", "depressed", "motivation",
+        "confidence", "they don't respect", "unheard", "not fair", "everything",
+        "complicated", "idk", "i don't know",
+    ]
+    if len(s_low) < 12:
+        return True
+    return any(v in s_low for v in vague)
+
+def format_bullets(lines):
+    return "\n".join([f"- {l}" for l in lines if l.strip()])
 
 @dataclass
-class Option:
-    label: str
-    delta: Dict[str, int]
+class Case:
+    goal: str
+    time_horizon: str
+    success_criteria: str
+    obstacle: str
+    problem: str
+    power: str
+    emotions: str
+    history: str
+    constraints: str
 
-@dataclass
-class Question:
-    prompt: str
-    options: List[Option]
+def solve_case(case: Case) -> Dict[str, str]:
+    """
+    Deterministic-ish solver: produces
+    - clarifying frame
+    - next actions
+    - impossibility proof if blocked
+    """
+    # 1) Determine if goal is properly defined
+    issues = []
+    if too_vague(case.goal):
+        issues.append("Goal is vague. Make it measurable.")
+    if too_vague(case.success_criteria):
+        issues.append("Success criteria is vague. Define a visible finish line.")
+    if too_vague(case.obstacle):
+        issues.append("Obstacle is vague. Name an observable blocker.")
+    if too_vague(case.problem):
+        issues.append("Problem statement is vague. Describe what is failing in observable terms.")
+    if too_vague(case.constraints):
+        issues.append("Constraints are vague. List what you cannot do, and any deadlines or boundaries.")
 
-def opt(label: str, I=0, E=0, A=0, R=0) -> Option:
-    return Option(label=label, delta={"Integrity": I, "Empathy": E, "Agency": A, "Restraint": R})
+    # 2) Identify likely category of blocker
+    power_low = clean_text(case.power).lower()
+    constraints_low = clean_text(case.constraints).lower()
+    emotions_low = clean_text(case.emotions).lower()
+    history_low = clean_text(case.history).lower()
 
-QUESTIONS: List[Question] = [
-    Question(
-        "Someone misunderstood you in public. Your first move is…",
-        [
-            opt("Correct them politely, fast, then move on.", I=2, E=1, A=1, R=2),
-            opt("Let it slide. Not worth it.", I=0, E=1, A=-1, R=2),
-            opt("Make a joke that still clears it up.", I=1, E=2, A=1, R=1),
-            opt("Snap back. They should’ve known better.", I=-2, E=-2, A=2, R=-2),
-        ],
-    ),
-    Question(
-        "A friend is late again. You’re thinking…",
-        [
-            opt("‘We need a system. This keeps happening.’", I=2, E=0, A=2, R=1),
-            opt("‘They’re dealing with something. I’ll be patient.’", I=0, E=2, A=-1, R=2),
-            opt("‘I’ll roast them when they show up.’", I=0, E=1, A=1, R=0),
-            opt("‘I’m done. Respect is not optional.’", I=2, E=-1, A=2, R=1),
-        ],
-    ),
-    Question(
-        "You catch yourself exaggerating a story to sound cooler.",
-        [
-            opt("You correct it immediately (even if it ruins the vibe).", I=3, E=0, A=0, R=2),
-            opt("You leave it… but feel weird later.", I=-1, E=0, A=0, R=1),
-            opt("You double down. ‘It’s entertainment.’", I=-2, E=0, A=1, R=-1),
-            opt("You pivot into humor so nobody takes it as fact.", I=0, E=1, A=1, R=1),
-        ],
-    ),
-    Question(
-        "Someone gives you constructive criticism. You…",
-        [
-            opt("Ask for specifics and take notes.", I=2, E=1, A=2, R=2),
-            opt("Smile, then ignore it forever.", I=-1, E=1, A=-2, R=1),
-            opt("Defend yourself first, reflect later.", I=0, E=0, A=1, R=-1),
-            opt("Take it personally and spiral.", I=-2, E=0, A=-2, R=-1),
-        ],
-    ),
-    Question(
-        "When you mess up, your default is…",
-        [
-            opt("Own it, fix it, move on.", I=3, E=1, A=2, R=2),
-            opt("Explain it so people understand your intent.", I=1, E=1, A=0, R=1),
-            opt("Hide it and hope it disappears.", I=-2, E=0, A=-2, R=2),
-            opt("Blame the situation (because… come on).", I=-2, E=-1, A=1, R=-1),
-        ],
-    ),
-    Question(
-        "You’re in a group chat argument. You’re most likely to…",
-        [
-            opt("Try to clarify definitions and reduce heat.", I=2, E=2, A=1, R=2),
-            opt("Drop one line that ends it. Then mute.", I=1, E=0, A=2, R=2),
-            opt("Keep replying because you’re ‘not done.’", I=0, E=-1, A=2, R=-2),
-            opt("Watch silently and judge everyone.", I=0, E=-1, A=-1, R=2),
-        ],
-    ),
-    Question(
-        "A stranger is rude to you. Your inner voice says…",
-        [
-            opt("‘They’re carrying something. Not mine.’", I=1, E=2, A=0, R=2),
-            opt("‘I can out-class this moment.’", I=2, E=0, A=1, R=2),
-            opt("‘Let’s go. We’re doing this today.’", I=-1, E=-2, A=2, R=-2),
-            opt("‘I’ll get them back quietly later.’", I=-2, E=-1, A=1, R=0),
-        ],
-    ),
-    Question(
-        "You’re given authority. You tend to…",
-        [
-            opt("Set clear expectations and follow-through.", I=2, E=1, A=2, R=2),
-            opt("Avoid conflict and let things slide.", I=-1, E=1, A=-2, R=1),
-            opt("Take over everything because it’s faster.", I=0, E=-1, A=2, R=0),
-            opt("Use the power to ‘teach a lesson.’", I=-2, E=-2, A=1, R=-2),
-        ],
-    ),
-    Question(
-        "You see a rule that makes no sense.",
-        [
-            opt("You follow it until you can change it properly.", I=2, E=0, A=1, R=2),
-            opt("You break it (quietly) because it’s dumb.", I=-1, E=0, A=2, R=-1),
-            opt("You ask who it protects and why it exists.", I=2, E=1, A=1, R=2),
-            opt("You rant about it for 20 minutes.", I=0, E=0, A=0, R=-2),
-        ],
-    ),
-    Question(
-        "Someone you love is upset. You usually…",
-        [
-            opt("Listen first, then offer help.", I=1, E=3, A=0, R=2),
-            opt("Try to fix the problem immediately.", I=1, E=0, A=2, R=1),
-            opt("Get uncomfortable and change the subject.", I=-1, E=-1, A=-1, R=1),
-            opt("Match their intensity (because fairness).", I=-1, E=-1, A=2, R=-2),
-        ],
-    ),
-    Question(
-        "You’re late. You tell people…",
-        [
-            opt("The truth, with the real reason.", I=3, E=0, A=0, R=2),
-            opt("A lighter version that sounds better.", I=-1, E=0, A=0, R=1),
-            opt("Nothing. You just show up and act normal.", I=-2, E=-1, A=-1, R=1),
-            opt("A joke that admits it without begging forgiveness.", I=0, E=1, A=1, R=1),
-        ],
-    ),
-    Question(
-        "When someone succeeds, you feel…",
-        [
-            opt("Genuinely happy for them.", I=1, E=2, A=0, R=2),
-            opt("Motivated. ‘My turn.’", I=1, E=0, A=2, R=1),
-            opt("Suspicious. ‘What’s the catch?’", I=-1, E=-1, A=0, R=2),
-            opt("Annoyed. ‘They don’t deserve that.’", I=-2, E=-2, A=0, R=-1),
-        ],
-    ),
-    Question(
-        "You find out you were wrong in a debate.",
-        [
-            opt("You say: ‘Yep. I was wrong.’", I=3, E=1, A=1, R=2),
-            opt("You change the topic fast.", I=-2, E=0, A=-1, R=1),
-            opt("You argue ‘technically’ you weren’t wrong.", I=-1, E=-1, A=1, R=-1),
-            opt("You laugh and give the other person their win.", I=1, E=2, A=0, R=2),
-        ],
-    ),
-    Question(
-        "You’re overwhelmed. Your pattern is…",
-        [
-            opt("Make a list. Start with the smallest win.", I=2, E=0, A=2, R=2),
-            opt("Disappear until it stops.", I=-2, E=0, A=-2, R=2),
-            opt("Power through and get snappy.", I=0, E=-1, A=2, R=-2),
-            opt("Ask for help even if it’s uncomfortable.", I=2, E=2, A=0, R=1),
-        ],
-    ),
-    Question(
-        "A boundary gets crossed. You…",
-        [
-            opt("Address it directly, calmly.", I=2, E=1, A=2, R=2),
-            opt("Let it slide, then resent it later.", I=-2, E=-1, A=-1, R=1),
-            opt("Go nuclear. Make sure it never happens again.", I=0, E=-2, A=2, R=-2),
-            opt("Make it a joke, but the message is clear.", I=1, E=1, A=1, R=1),
-        ],
-    ),
-    Question(
-        "You promise something. You’re…",
-        [
-            opt("Reliable. If you said it, it’s happening.", I=3, E=0, A=2, R=2),
-            opt("Optimistic… then busy… then apologetic.", I=-1, E=1, A=0, R=0),
-            opt("Careful not to promise unless you’re sure.", I=2, E=0, A=1, R=2),
-            opt("A wild card. Depends on how you feel.", I=-2, E=0, A=-1, R=-2),
-        ],
-    ),
-    Question(
-        "You catch someone lying. You…",
-        [
-            opt("Ask questions until the truth shows itself.", I=2, E=1, A=1, R=2),
-            opt("Call it out immediately.", I=2, E=0, A=2, R=0),
-            opt("Clock it, store it, adjust your trust.", I=2, E=0, A=0, R=2),
-            opt("Lie back (because we’re playing now).", I=-3, E=-2, A=2, R=-2),
-        ],
-    ),
-    Question(
-        "A plan fails. Your first reaction is…",
-        [
-            opt("‘Okay—what did we learn?’", I=2, E=1, A=2, R=2),
-            opt("‘Who messed this up?’", I=-2, E=-1, A=1, R=-1),
-            opt("‘I should’ve done it myself.’", I=0, E=-1, A=2, R=0),
-            opt("‘It was doomed anyway.’", I=-2, E=0, A=-2, R=1),
-        ],
-    ),
-    Question(
-        "You walk into a room of strangers. You tend to…",
-        [
-            opt("Read the room first, then engage.", I=1, E=1, A=0, R=2),
-            opt("Break the ice—make it easy for everyone.", I=1, E=2, A=1, R=1),
-            opt("Command attention (intentionally or not).", I=0, E=-1, A=2, R=-1),
-            opt("Stay guarded until you feel safe.", I=1, E=0, A=-1, R=2),
-        ],
-    ),
-    Question(
-        "At your best, people would describe you as…",
-        [
-            opt("Solid. Consistent. Real.", I=3, E=0, A=1, R=2),
-            opt("Warm. Easy to trust.", I=1, E=3, A=0, R=1),
-            opt("Driven. Gets results.", I=1, E=0, A=3, R=0),
-            opt("Unbothered. Hard to shake.", I=1, E=0, A=0, R=3),
-        ],
-    ),
-]
+    # Heuristics (simple but useful)
+    external_power_block = any(k in power_low for k in ["they decide", "they control", "approval", "permission", "budget owner", "manager", "vp", "board"]) \
+        and any(k in constraints_low for k in ["can't", "cannot", "not allowed", "policy", "legal", "hr", "contract", "compliance"])
 
-ARCHETYPES = [
-    {
-        "name": "The Anchor",
-        "tagline": "Steady, accountable, and quietly dangerous in a good way.",
-        "when_healthy": "People feel safe around you because you’re consistent. You don’t need chaos to feel alive.",
-        "shadow": "When stressed, you can become rigid and dismissive—like feelings are an obstacle.",
-        "upgrade": "Say the truth sooner, with warmth. You’ll lose less time cleaning up misunderstandings.",
-        "rule": "Consistency is charisma.",
-        "signature_dims": ("Integrity", "Restraint"),
-    },
-    {
-        "name": "The Radiator",
-        "tagline": "Warm, connective, and socially magnetic.",
-        "when_healthy": "You make people feel seen. You can turn tension into connection.",
-        "shadow": "When stressed, you over-accommodate or people-please—then privately resent it.",
-        "upgrade": "Trade hinting for clear asks. Directness will protect your generosity.",
-        "rule": "Soft doesn’t mean weak.",
-        "signature_dims": ("Empathy", "Integrity"),
-    },
-    {
-        "name": "The Engine",
-        "tagline": "High agency. Big momentum. You move reality.",
-        "when_healthy": "You get results and pull others forward. You’re allergic to stagnation.",
-        "shadow": "When stressed, you get sharp, controlling, and impatient—like everyone is in your way.",
-        "upgrade": "Slow down for 10 seconds before you speak when irritated. Your influence will double.",
-        "rule": "Speed is useful. Precision is power.",
-        "signature_dims": ("Agency", "Integrity"),
-    },
-    {
-        "name": "The Spark",
-        "tagline": "Bold, reactive, funny, and unpredictable—in a way that makes life interesting.",
-        "when_healthy": "You energize rooms and say what others won’t. You’re honest in a raw way.",
-        "shadow": "When stressed, you burn bridges for sport (and call it ‘truth’).",
-        "upgrade": "Aim your fire at problems, not people. You’ll keep your edge and gain trust.",
-        "rule": "Your tone writes your story.",
-        "signature_dims": ("Agency", "Empathy"),
-    },
-]
+    must_escalate = any(k in constraints_low for k in ["must escalate", "has to be escalated", "required escalation", "non-negotiable escalation"])
+    time_urgent = any(k in constraints_low for k in ["today", "now", "immediately", "this week", "24", "48 hours", "deadline"])
+    avoidance_risk = any(k in emotions_low for k in ["fear", "guilt", "shame", "anger", "resent", "anxious"])
 
-def empty_scores() -> Dict[str, int]:
-    return {d: 0 for d in DIMENSIONS}
+    # 3) Produce outputs
+    frame = []
+    frame.append(f"Goal: {case.goal}")
+    frame.append(f"Horizon: {case.time_horizon}")
+    frame.append(f"Success: {case.success_criteria}")
+    frame.append(f"Biggest obstacle: {case.obstacle}")
+    frame.append(f"Observable problem: {case.problem}")
+    frame.append(f"Power dynamics: {case.power}")
+    frame.append(f"Constraints: {case.constraints}")
 
-def compute_scores(answers: List[int]) -> Dict[str, int]:
-    scores = empty_scores()
-    for qi, oi in enumerate(answers):
-        option = QUESTIONS[qi].options[oi]
-        for k, v in option.delta.items():
-            scores[k] += v
-    return scores
+    # If input is too vague, return a tight correction checklist (black-and-white).
+    if issues:
+        return {
+            "status": "NEEDS_CLARITY",
+            "summary": "Inputs are not operational yet. Fix these before strategy.",
+            "frame": "\n".join(frame),
+            "output": format_bullets(issues),
+        }
 
-def pick_archetype(scores: Dict[str, int]) -> Tuple[dict, Dict[str, int]]:
-    # Normalize to 0-100-ish for display
-    # Raw range roughly: [-60, +60]; shift +60 => [0,120]
-    scaled = {k: max(0, min(120, v + 60)) for k, v in scores.items()}
-    # Find dominant dimension pair match
-    best = None
-    best_score = -10**9
-    for a in ARCHETYPES:
-        d1, d2 = a["signature_dims"]
-        s = scaled[d1] + scaled[d2]
-        # small tie-breaker: total positive balance
-        s += sum(scaled.values()) * 0.02
-        if s > best_score:
-            best_score = s
-            best = a
-    return best, scaled
+    # 4) Determine “possible vs impossible under constraints”
+    # If external power is required and user can't access leverage, declare it blocked unless they can gain leverage.
+    if external_power_block and not must_escalate:
+        return {
+            "status": "BLOCKED_BY_AUTHORITY",
+            "summary": "This goal is blocked by authority you don’t currently control.",
+            "frame": "\n".join(frame),
+            "output": format_bullets([
+                "Decide: (A) change the goal to one you control, or (B) acquire leverage.",
+                "Leverage options: get explicit sponsor, secure written requirements, or negotiate scope/terms.",
+                "If you cannot gain authority or sponsor within the horizon, the original goal is impossible under constraints.",
+            ]),
+        }
+
+    # If escalation is required/urgent, give escalation plan with damage control.
+    if must_escalate or time_urgent:
+        steps = [
+            "Write a 6-sentence escalation brief (facts only): what failed, impact, timeline, attempted fixes, request, deadline.",
+            "Name the decision you need in one line. Do not ask for ‘thoughts’.",
+            "Propose 2 options: (1) fastest safe path, (2) fallback path. Each with cost.",
+            "Set a hard response deadline aligned to your horizon.",
+            "After escalation: execute immediately; report progress at a fixed cadence.",
+        ]
+        if avoidance_risk:
+            steps.insert(0, "State the emotion privately (fear/anger/guilt). Then act anyway. Emotion is not an input to the decision.")
+        if "hr" in constraints_low:
+            steps.append("If HR is involved: keep it factual, documented, and policy-aligned. No character judgments.")
+
+        return {
+            "status": "ACTIONABLE",
+            "summary": "Escalation path is valid. Make it clean, factual, and time-bound.",
+            "frame": "\n".join(frame),
+            "output": format_bullets(steps),
+        }
+
+    # Otherwise: standard solve
+    steps = [
+        "Convert obstacle into a smallest next action you can complete in <30 minutes.",
+        "Remove ambiguity: define who does what by when (names/roles, deliverables, dates).",
+        "Create a single source of truth (one doc / one thread).",
+        "If the same failure happened before: change the system, not the speech.",
+    ]
+    if "miss" in history_low or "again" in history_low or "pattern" in history_low:
+        steps.append("Because this is recurring: add a constraint (checkpoints, approvals, or automatic reminders).")
+    if avoidance_risk:
+        steps.append("Your emotion is a distortion risk. Don’t negotiate with it—ship the next action anyway.")
+
+    # Impossibility clause
+    steps.append("If after 2 cycles the constraint remains unchanged, declare: impossible under current constraints, and rewrite the goal.")
+
+    return {
+        "status": "ACTIONABLE",
+        "summary": "You can move this forward with controlled execution.",
+        "frame": "\n".join(frame),
+        "output": format_bullets(steps),
+    }
 
 # -----------------------------
-# State
+# Stripe Paywall
 # -----------------------------
-if "step" not in st.session_state:
-    st.session_state.step = "curtain_1"
-if "answers" not in st.session_state:
-    st.session_state.answers = [-1] * len(QUESTIONS)
-if "q_index" not in st.session_state:
-    st.session_state.q_index = 0
+def stripe_configured() -> bool:
+    if not PAYWALL_ENABLED:
+        return False
+    return (
+        stripe is not None
+        and STRIPE_SECRET_KEY
+        and STRIPE_PRICE_ID
+        and STRIPE_SUCCESS_URL
+        and STRIPE_CANCEL_URL
+    )
 
-def go(step: str):
-    st.session_state.step = step
+def create_checkout_session() -> str:
+    """
+    Creates a Stripe Checkout Session and returns the URL.
+    """
+    stripe.api_key = STRIPE_SECRET_KEY
+    session = stripe.checkout.Session.create(
+        mode="subscription",  # change to "payment" for one-time
+        line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+        success_url=STRIPE_SUCCESS_URL + "&session_id={CHECKOUT_SESSION_ID}",
+        cancel_url=STRIPE_CANCEL_URL,
+        allow_promotion_codes=True,
+    )
+    return session.url
 
-def reset():
-    st.session_state.step = "curtain_1"
-    st.session_state.answers = [-1] * len(QUESTIONS)
-    st.session_state.q_index = 0
+def verify_checkout_session(session_id: str) -> bool:
+    """
+    Verifies the session payment status.
+    For subscriptions, check session.payment_status and/or subscription status.
+    """
+    stripe.api_key = STRIPE_SECRET_KEY
+    sess = stripe.checkout.Session.retrieve(session_id)
+    # For one-time payments: payment_status == "paid"
+    # For subscriptions: payment_status often "paid" as well for the first invoice; subscription object exists.
+    paid = (getattr(sess, "payment_status", "") == "paid")
+    return bool(paid)
+
+def paywall_gate() -> None:
+    """
+    Shows paywall UI and blocks rest of app unless unlocked.
+    """
+    # Already unlocked in session
+    if st.session_state.get("paid", False):
+        return
+
+    # Verify if user returned from Stripe
+    qp = st.query_params
+    paid_flag = qp.get("paid", "0")
+    session_id = qp.get("session_id", "")
+
+    if paid_flag == "1" and session_id and stripe_configured():
+        try:
+            if verify_checkout_session(session_id):
+                st.session_state.paid = True
+                return
+        except Exception:
+            pass
+
+    # Paywall screen
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="h1">Access Required</div>
+          <div class="muted">
+            To use the tool, purchase access. Contact: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>
+          </div>
+          <div class="hr"></div>
+          <div class="muted">
+            You will be redirected to Stripe Checkout.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not stripe_configured():
+        st.error("Stripe is not configured. Set Stripe secrets to enable the paywall.")
+        st.stop()
+
+    if st.button("Continue to Stripe Checkout"):
+        try:
+            url = create_checkout_session()
+            st.link_button("Open Checkout", url)
+            st.stop()
+        except Exception as e:
+            st.error(f"Checkout error: {e}")
+            st.stop()
+
+    st.stop()
 
 # -----------------------------
-# Header
+# Header (minimal, serious)
 # -----------------------------
 st.markdown(
     f"""
-<div class="panel">
-  <div class="brand">Brought to you by GiveItToGot</div>
-  <div class="title">Reflection</div>
-  <div class="subtitle">A question in front of a curtain. Want to see your reflection?</div>
-  <div class="small">Contact: <a href="mailto:baileylloyd211@gmail.com">baileylloyd211@gmail.com</a></div>
-</div>
-""",
+    <div class="card">
+      <div class="h1">Problem Solver</div>
+      <div class="muted">
+        Contact: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>
+      </div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
+# Paywall (if enabled)
+if PAYWALL_ENABLED:
+    paywall_gate()
+
 # -----------------------------
-# Curtain Screens
+# Tabs: Solve | Privacy | Embed
 # -----------------------------
-if st.session_state.step == "curtain_1":
+tab_solve, tab_privacy, tab_embed = st.tabs(["Solve", "Privacy", "Embed"])
+
+with tab_solve:
     st.markdown(
         """
-<div class="mirrorStage">
-  <div class="curtainLeft"><div class="curtainFold"></div></div>
-  <div class="curtainRight"><div class="curtainFold"></div></div>
-  <div class="stageInner">
-    <div class="lipstick">
-      <strong>Want to see your reflection?</strong><br/>
-      One tap and the curtain moves.
-    </div>
-    <div class="mirrorGlass">
-      <div class="caption">
-        This is the part where most people say “yeah… obviously.”<br/>
-        So—go ahead.
-      </div>
-    </div>
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        if st.button("Pull the curtain ▶", use_container_width=True):
-            go("curtain_2")
-    with c2:
-        if st.button("Reset", use_container_width=True):
-            reset()
-
-elif st.session_state.step == "curtain_2":
-    st.markdown(
-        """
-<div class="panel">
-  <div class="subtitle" style="margin-bottom:8px;">
-    That’s what I thought. Most people do.
-  </div>
-  <div class="small">
-    But if I showed you what you <em>do</em>… who would be the first person you’d tell about your reflection?
-  </div>
-  <div class="hr"></div>
-  <div class="small">
-    Will your appearance matter the next time you ask to see yourself?
-    Will the world be a better place now that you know who you are?
-    Will you say “I’ve always known that,” or does it matter either way?
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    if st.button("Show me the questions", use_container_width=True):
-        go("quiz")
-
-# -----------------------------
-# Quiz UI
-# -----------------------------
-elif st.session_state.step == "quiz":
-    qi = st.session_state.q_index
-    total = len(QUESTIONS)
-
-    # Progress
-    answered = sum(1 for a in st.session_state.answers if a != -1)
-    st.markdown('<div class="progressWrap"></div>', unsafe_allow_html=True)
-    st.progress(answered / total)
-
-    q = QUESTIONS[qi]
-    st.markdown(
-        f"""
-<div class="panel">
-  <div class="pill">Question {qi+1} / {total}</div>
-  <div style="font-size:1.25rem; font-weight:800; margin-top:8px;">{q.prompt}</div>
-  <div class="hr"></div>
-</div>
-""",
+        <div class="card">
+          <div class="h2"><span class="red">Black & white</span> inputs. Real outputs.</div>
+          <div class="muted">Finish with a next action, or prove the goal is impossible under current constraints.</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Current selection
-    key = f"q_{qi}"
-    options = [o.label for o in q.options]
-    default_index = st.session_state.answers[qi] if st.session_state.answers[qi] != -1 else 0
+    with st.form("case_form", clear_on_submit=False):
+        st.markdown("### Goal")
+        goal = st.text_input("What are you trying to accomplish?", placeholder="Example: Ship v1 landing page")
+        time_horizon = st.text_input("By when?", placeholder="Example: Friday 5pm")
+        success_criteria = st.text_input("What does success look like (observable)?", placeholder="Example: Page live + checkout works")
 
-    choice = st.radio(
-        "Pick the one that’s most like you:",
-        options,
-        index=default_index,
-        key=key,
-        label_visibility="collapsed",
-    )
+        st.markdown("### Biggest obstacle")
+        obstacle = st.text_area("Name the single biggest obstacle right now.", height=90, placeholder="Example: Payment flow not implemented")
 
-    # Save selection
-    st.session_state.answers[qi] = options.index(choice)
+        st.markdown("### Required context")
+        problem = st.text_area("Problem (observable failure).", height=90, placeholder="Example: Users cannot pay; no Stripe checkout integrated")
+        power = st.text_area("Power dynamics (who can change what).", height=90, placeholder="Example: I control code; Stripe account owner controls keys")
+        emotions = st.text_area("Emotional stakes (what may distort judgment).", height=90, placeholder="Example: Fear of shipping something broken")
+        history = st.text_area("History (patterns, frequency).", height=90, placeholder="Example: I've delayed this twice; kept rebuilding UI")
+        constraints = st.text_area("Constraints (what you cannot do + deadlines/boundaries).", height=90, placeholder="Example: Must launch this week; cannot hire contractor")
 
-    # Nav buttons
-    left, mid, right = st.columns([1, 1, 1])
-    with left:
-        if st.button("◀ Back", use_container_width=True, disabled=(qi == 0)):
-            st.session_state.q_index = max(0, qi - 1)
-            st.rerun()
-    with mid:
-        if st.button("Reset", use_container_width=True):
-            reset()
-            st.rerun()
-    with right:
-        if qi < total - 1:
-            if st.button("Next ▶", use_container_width=True):
-                st.session_state.q_index = min(total - 1, qi + 1)
-                st.rerun()
-        else:
-            if st.button("Reveal my reflection 🪞", use_container_width=True):
-                go("result")
-                st.rerun()
+        submitted = st.form_submit_button("Run")
 
-# -----------------------------
-# Result Screen (Mirror + Lipstick)
-# -----------------------------
-elif st.session_state.step == "result":
-    # Ensure all answered (if user jumped around)
-    if any(a == -1 for a in st.session_state.answers):
-        st.warning("Finish all questions to reveal the mirror.")
-    else:
-        raw_scores = compute_scores(st.session_state.answers)
-        archetype, scaled = pick_archetype(raw_scores)
-
-        # Compute a spicy one-liner based on strongest/weakest dims
-        best_dim = max(scaled.items(), key=lambda x: x[1])[0]
-        worst_dim = min(scaled.items(), key=lambda x: x[1])[0]
-
-        one_liners = {
-            ("Integrity", "Empathy"): "You tell the truth… but you don’t have to make it hurt.",
-            ("Integrity", "Agency"): "You mean well—and you move fast. Just don’t outrun your own standards.",
-            ("Integrity", "Restraint"): "Your discipline is loud even when you’re quiet.",
-            ("Empathy", "Integrity"): "You can read people. Don’t let that become permission to ignore yourself.",
-            ("Empathy", "Agency"): "You can lead with heart—just don’t lead with guilt.",
-            ("Empathy", "Restraint"): "You’re calm enough to be dangerous (in the best way).",
-            ("Agency", "Integrity"): "You can build anything. Make sure you’re building the right thing.",
-            ("Agency", "Empathy"): "You’re powerful. Aim that power like you respect people.",
-            ("Agency", "Restraint"): "You’re the gas pedal. Learn the brakes and you’ll be unstoppable.",
-            ("Restraint", "Integrity"): "You’re hard to shake. That’s rare.",
-            ("Restraint", "Empathy"): "You keep your cool—now let people in a little.",
-            ("Restraint", "Agency"): "You’re controlled and capable. That combination changes outcomes.",
-        }
-        line = one_liners.get((best_dim, worst_dim), "You’re more consistent than you think—and more readable than you want.")
+    if submitted:
+        case = Case(
+            goal=clean_text(goal),
+            time_horizon=clean_text(time_horizon),
+            success_criteria=clean_text(success_criteria),
+            obstacle=clean_text(obstacle),
+            problem=clean_text(problem),
+            power=clean_text(power),
+            emotions=clean_text(emotions),
+            history=clean_text(history),
+            constraints=clean_text(constraints),
+        )
+        result = solve_case(case)
 
         st.markdown(
             f"""
-<div class="mirrorStage">
-  <div class="stageInner">
-    <div class="lipstick">
-      Got something stuck in your teeth?<br/>
-      <strong>Well… here you go.</strong>
-    </div>
-
-    <div class="mirrorGlass">
-      <div class="lipstick" style="font-size:1.35rem;">
-        <strong>{archetype["name"]}</strong><br/>
-        {archetype["tagline"]}
-      </div>
-      <div class="hr"></div>
-      <div class="caption" style="font-size:1.02rem;">
-        {line}
-      </div>
-      <div class="hr"></div>
-      <div class="caption"><strong>When you’re healthy:</strong> {archetype["when_healthy"]}</div>
-      <div class="caption" style="margin-top:8px;"><strong>When you’re stressed:</strong> {archetype["shadow"]}</div>
-      <div class="caption" style="margin-top:8px;"><strong>One upgrade:</strong> {archetype["upgrade"]}</div>
-      <div class="caption" style="margin-top:8px;"><strong>Rule:</strong> {archetype["rule"]}</div>
-
-      <div class="scoreGrid">
-        <div class="metric"><div class="k">Integrity</div><div class="v">{scaled["Integrity"]}/120</div></div>
-        <div class="metric"><div class="k">Empathy</div><div class="v">{scaled["Empathy"]}/120</div></div>
-        <div class="metric"><div class="k">Agency</div><div class="v">{scaled["Agency"]}/120</div></div>
-        <div class="metric"><div class="k">Restraint</div><div class="v">{scaled["Restraint"]}/120</div></div>
-      </div>
-    </div>
-
-    <div class="footer">
-      Curtains pulled back. Mirror’s honest.<br/>
-      Brought to you by <strong>GiveItToGot</strong> — <a href="mailto:baileylloyd211@gmail.com">baileylloyd211@gmail.com</a>
-    </div>
-  </div>
-</div>
-""",
+            <div class="card">
+              <div class="badge">{result["status"]}</div>
+              <div class="hr"></div>
+              <div class="h2">{result["summary"]}</div>
+              <div class="hr"></div>
+              <div class="mono" style="white-space: pre-wrap; line-height: 1.45;">{result["frame"]}</div>
+              <div class="hr"></div>
+              <div class="mono" style="white-space: pre-wrap; line-height: 1.55;">{result["output"]}</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("Run it again", use_container_width=True):
-                reset()
-                st.rerun()
-        with c2:
-            if st.button("Jump to questions", use_container_width=True):
-                go("quiz")
-                st.rerun()
+with tab_privacy:
+    st.markdown(
+        f"""
+        <div class="card">
+          <div class="h2">Privacy</div>
+          <div class="muted">This app embeds your existing policy.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not PRIVACY_POLICY_URL:
+        st.error("Set PRIVACY_POLICY_URL in secrets to embed your privacy policy page.")
+    else:
+        # Streamlit iframe
+        st.components.v1.iframe(PRIVACY_POLICY_URL, height=760, scrolling=True)
+
+with tab_embed:
+    st.markdown(
+        """
+        <div class="card">
+          <div class="h2">Embed</div>
+          <div class="muted">Use this iframe to embed the app elsewhere.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not APP_PUBLIC_URL:
+        st.error("Set APP_PUBLIC_URL in secrets to generate the embed snippet.")
+    else:
+        snippet = f"""<iframe src="{APP_PUBLIC_URL}" width="100%" height="820" frameborder="0"></iframe>"""
+        st.code(snippet, language="html")
+        st.markdown(
+            '<div class="muted">Note: some platforms block iframes. If it fails, embed a link instead.</div>',
+            unsafe_allow_html=True,
+        )
