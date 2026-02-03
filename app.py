@@ -101,7 +101,21 @@ textarea, input, .stTextInput>div>div>input {
 }
 </style>
 """
-st.markdown(CSS, unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="card">
+      <div class="badge">SYNTHESIS · {s["type"]}</div>
+      <div class="muted">TRIGGER: "{s["trigger"]}"</div>
+      <div class="hr"></div>
+      <div class="h2">{s["statement"]}</div>
+      <div class="muted">{s["exclude"]}</div>
+      <div class="hr"></div>
+      <div class="mono">NEXT MOVE REQUIRED: {s["next"]}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # -----------------------------
 # Helpers
