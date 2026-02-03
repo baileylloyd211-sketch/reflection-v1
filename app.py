@@ -152,38 +152,47 @@ class Case:
 def synthesize(goal: str, obstacle: str) -> Dict[str, str]:
     o = obstacle.lower()
 
-    if any(k in o for k in ["approval", "permission", "sign off", "sign-off"]):
-        return {
-            "type": "POWER",
-            "statement": "This is primarily a power problem.",
-            "exclude": "This is not a motivation or effort issue.",
-            "next": "Name the decision-maker and their explicit criteria."
-        }
+    power_keys = ["approval", "permission", "sign off", "sign-off"]
+    time_keys = ["deadline", "time", "late", "urgent"]
+    clarity_keys = ["unclear", "confusing", "not sure", "undefined"]
 
-    if any(k in o for k in ["deadline", "time", "late", "urgent"]):
-        return {
-            "type": "TIME",
-            "statement": "This is primarily a time constraint problem.",
-            "exclude": "This is not a quality or strategy issue.",
-            "next": "State the hard deadline and what can be cut."
-        }
+    for k in power_keys:
+        if k in o:
+            return {
+                "type": "POWER",
+                "trigger": k,
+                "statement": "This is primarily a power problem.",
+                "exclude": "This is not a motivation or effort issue.",
+                "next": "Name the decision-maker and their explicit criteria."
+            }
 
-    if any(k in o for k in ["unclear", "confusing", "not sure", "undefined"]):
-        return {
-            "type": "CLARITY",
-            "statement": "This is primarily a clarity problem.",
-            "exclude": "This is not a capability issue.",
-            "next": "Write a one-sentence definition of done."
-        }
+    for k in time_keys:
+        if k in o:
+            return {
+                "type": "TIME",
+                "trigger": k,
+                "statement": "This is primarily a time constraint problem.",
+                "exclude": "This is not a quality or strategy issue.",
+                "next": "State the hard deadline and what can be cut."
+            }
+
+    for k in clarity_keys:
+        if k in o:
+            return {
+                "type": "CLARITY",
+                "trigger": k,
+                "statement": "This is primarily a clarity problem.",
+                "exclude": "This is not a capability issue.",
+                "next": "Write a one-sentence definition of done."
+            }
 
     return {
         "type": "EXECUTION",
+        "trigger": "default",
         "statement": "This is primarily an execution problem.",
         "exclude": "This is not blocked by authority.",
         "next": "Identify the smallest action you can complete in 30 minutes."
     }
-
-
 
 
 
